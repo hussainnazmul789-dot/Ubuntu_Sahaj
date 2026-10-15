@@ -1,1 +1,244 @@
+name: Build Sahaj for Ubuntu
 
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    name: Smoke test (fast)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            portaudio19-dev ffmpeg libsndfile1 \
+            libgl1 libegl1 libxkbcommon-x11-0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xinerama0 libxcb-cursor0 \
+            libdbus-1-3 libfontconfig1 \
+            fonts-noto-core xvfb
+
+      - name: Install PyTorch and Fairseq Dependencies
+        run: |
+          python -m pip install "pip<24.1"
+          pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install git+https://github.com/facebookresearch/fairseq.git
+
+      - name: Install Application Requirements
+        run: |
+          pip install PySide6 requests ai4bharat-transliteration pyinstaller scikit-learn py-machineid cryptography
+          pip install indic-asr-onnx pyaudio huggingface_hub transformers tokenizers onnxruntime psutil
+          pip install soundfile
+
+      - name: Patch fairseq dataclass (same fix as Windows)
+        run: |
+          cat > patch_fairseq.py <<'EOF'
+          import os, sys
+          sys.path.insert(0, os.path.join(sys.prefix, 'lib',
+              f'python{sys.version_info.major}.{sys.version_info.minor}',
+              'site-packages'))
+          import fairseq.dataclass.configs
+          f = fairseq.dataclass.configs.__file__
+          with open(f, 'r', encoding='utf-8') as fp:
+              content = fp.read()
+          if 'help = ""' not in content:
+              with open(f, 'w', encoding='utf-8') as fp:
+                  fp.write('help = ""\n' + content)
+          print("Patched", f)
+          EOF
+          python patch_fairseq.py
+
+      - name: Import smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -c "import PySide6; print('PySide6 OK')"
+          python -c "import soundfile; print('soundfile OK ->', soundfile.__version__)"
+          python -c "import app_utils; print('app_utils OK ->', app_utils.get_user_data_dir())"
+          python -c "import app_styles; print('app_styles OK')"
+          python -c "import sahaj_license; print('sahaj_license OK ->', sahaj_license._token_backup_path())"
+          python -c "import app_widgets; print('app_widgets OK')"
+          python -c "import app_workers; print('app_workers OK')"
+          python -c "import typing_modes; print('typing_modes OK')"
+          python -c "import app_dialogs; print('app_dialogs OK')"
+
+      - name: GUI smoke test (headless, times out after 25s)
+        run: |
+          xvfb-run -a --server-args="-screen 0 1280x800x24" \
+            timeout 25 python main.py > /tmp/app.log 2>&1 || true
+          echo "----- app.log (last 100 lines) -----"
+          tail -n 100 /tmp/app.log
+
+      - name: Upload log if smoke test failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-smoke-log
+          path: /tmp/app.log
+          retention-days: 3
+
+  build:
+    name: Build Ubuntu executable
+    needs: smoke-test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            portaudio19-dev ffmpeg libsndfile1 \
+            libgl1 libegl1 libxkbcommon-x11-0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xinerama0 libxcb-cursor0 \
+            libdbus-1-3 libfontconfig1 \
+            fonts-noto-core
+
+      - name: Install PyTorch and Fairseq Dependencies
+        run: |
+          python -m pip install "pip<24.1"
+          pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install git+https://github.com/facebookresearch/fairseq.git
+
+      - name: Install Application Requirements
+        run: |
+          pip install PySide6 requests ai4bharat-transliteration pyinstaller scikit-learn py-machineid cryptography
+          pip install indic-asr-onnx pyaudio huggingface_hub transformers tokenizers onnxruntime psutil
+          pip install soundfile
+
+      - name: Patch fairseq dataclass
+        run: |
+          cat > patch_fairseq.py <<'EOF'
+          import os, sys
+          sys.path.insert(0, os.path.join(sys.prefix, 'lib',
+              f'python{sys.version_info.major}.{sys.version_info.minor}',
+              'site-packages'))
+          import fairseq.dataclass.configs
+          f = fairseq.dataclass.configs.__file__
+          with open(f, 'r', encoding='utf-8') as fp:
+              content = fp.read()
+          if 'help = ""' not in content:
+              with open(f, 'w', encoding='utf-8') as fp:
+                  fp.write('help = ""\n' + content)
+          print("Patched", f)
+          EOF
+          python patch_fairseq.py
+
+      - name: Download AI4Bharat transliteration models
+        run: |
+          python -c "from ai4bharat.transliteration import XlitEngine; XlitEngine('as', beam_width=4, rescore=False)"
+          python -c "import os, shutil, ai4bharat; pkg_dir = os.path.dirname(ai4bharat.__file__); v1_dir = os.path.join(pkg_dir, 'transliteration', 'transformer', 'models', 'en2indic', 'v1.0'); os.makedirs('offline_model_cache', exist_ok=True); shutil.copytree(v1_dir, 'offline_model_cache', dirs_exist_ok=True)"
+
+      - name: Copy lang_list.txt
+        run: |
+          python -c "import os, shutil, ai4bharat; pkg_dir = os.path.dirname(ai4bharat.__file__); src = os.path.join(pkg_dir, 'transliteration', 'transformer', 'models', 'en2indic', 'lang_list.txt'); shutil.copy2(src, 'lang_list.txt')"
+
+      - name: Pre-download ASR model
+        run: |
+          cat > download_asr.py <<'EOF'
+          import os, shutil
+          from indic_asr_onnx import IndicTranscriber
+          transcriber = IndicTranscriber()
+          print('ASR model downloaded successfully.')
+          hub_cache = os.path.expanduser('~/.cache/huggingface/hub')
+          print(f'Searching in {hub_cache}')
+          if not os.path.exists(hub_cache):
+              raise FileNotFoundError('HF cache not found.')
+          found = False
+          for item in os.listdir(hub_cache):
+              if item.startswith('models--') and ('indic' in item.lower() or 'asr' in item.lower()):
+                  src = os.path.join(hub_cache, item)
+                  if os.path.isdir(src):
+                      target_dir = os.path.join('indic_asr_cache', item)
+                      os.makedirs('indic_asr_cache', exist_ok=True)
+                      shutil.copytree(src, target_dir, dirs_exist_ok=True)
+                      print(f'Copied ASR model to {target_dir}')
+                      found = True
+                      break
+          if not found:
+              print('Available:', os.listdir(hub_cache))
+              raise FileNotFoundError('ASR model not found in cache.')
+          print('indic_asr_cache ready.')
+          EOF
+          python download_asr.py
+
+      - name: Debug — list cached files
+        run: |
+          echo "--- offline_model_cache ---"; ls -la offline_model_cache || true
+          echo "--- lang_list.txt ---"; ls -la lang_list.txt || true
+          echo "--- indic_asr_cache ---"; ls -la indic_asr_cache || true
+
+      - name: Build executable with PyInstaller
+        run: |
+          pyinstaller --noconfirm --onedir --windowed \
+            --add-data "assamese_dictionary.txt:." \
+            --add-data "dictionary.json:." \
+            --add-data "Nirmala.ttf:." \
+            --add-data "Banikanta.ttf:." \
+            --add-data "header_logo.png:." \
+            --add-data "header_icon.png:." \
+            --add-data "splash_animation.gif:." \
+            --add-data "donate_qr.png:." \
+            --add-data "lang_list.txt:ai4bharat/transliteration/transformer/models/en2indic" \
+            --add-data "offline_model_cache:ai4bharat/transliteration/transformer/models/en2indic/v1.0" \
+            --add-data "indic_asr_cache:indic_asr_cache" \
+            --collect-all fairseq \
+            --collect-all hydra \
+            --collect-all omegaconf \
+            --collect-all sklearn \
+            --collect-all torch \
+            --collect-all numpy \
+            --collect-all onnxruntime \
+            --collect-all huggingface_hub \
+            --collect-all transformers \
+            --collect-all tokenizers \
+            --collect-all indic_asr_onnx \
+            --collect-all torchaudio \
+            --collect-all soundfile \
+            --hidden-import=machineid \
+            main.py
+
+      - name: Package as tar.gz
+        run: |
+          cd dist
+          tar -czf Sahaj-linux.tar.gz main/
+          echo "----- Package created -----"
+          ls -lh Sahaj-linux.tar.gz
+
+      - name: Upload Linux build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sahaj-linux-build
+          path: dist/Sahaj-linux.tar.gz
+          retention-days: 3

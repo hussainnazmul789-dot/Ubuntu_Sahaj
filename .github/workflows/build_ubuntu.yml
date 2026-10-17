@@ -196,6 +196,7 @@ jobs:
       - name: Build executable with PyInstaller
         run: |
           pyinstaller --noconfirm --onedir --windowed \
+            --name Sahaj_3.0 \
             --add-data "assamese_dictionary.txt:." \
             --add-data "dictionary.json:." \
             --add-data "Nirmala.ttf:." \
@@ -238,14 +239,14 @@ jobs:
           mkdir -p "$PKG_ROOT/usr/share/icons/hicolor/256x256/apps"
           mkdir -p "$PKG_ROOT/opt/sahaj"
 
-          # 1. Copy the PyInstaller output
-          cp -r dist/main/* "$PKG_ROOT/opt/sahaj/"
+          # 1. Copy the PyInstaller output (Notice the new folder name!)
+          cp -r dist/Sahaj_3.0/* "$PKG_ROOT/opt/sahaj/"
 
-          # 2. Create the launcher script in /usr/bin/sahaj
+          # 2. Create the launcher script in /usr/bin/sahaj (Notice the new executable name!)
           cat > "$PKG_ROOT/usr/bin/sahaj" <<'EOF'
           #!/bin/bash
           cd /opt/sahaj
-          exec /opt/sahaj/main "$@"
+          exec /opt/sahaj/Sahaj_3.0 "$@"
           EOF
           chmod 755 "$PKG_ROOT/usr/bin/sahaj"
 

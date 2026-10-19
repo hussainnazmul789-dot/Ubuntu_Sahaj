@@ -1,8 +1,6 @@
 name: Build Sahaj for Ubuntu
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -237,12 +235,14 @@ jobs:
           mkdir -p "$PKG_ROOT/usr/bin"
           mkdir -p "$PKG_ROOT/usr/share/applications"
           mkdir -p "$PKG_ROOT/usr/share/icons/hicolor/256x256/apps"
+          mkdir -p "$PKG_ROOT/usr/share/pixmaps"
+          mkdir -p "$PKG_ROOT/usr/share/metainfo"
           mkdir -p "$PKG_ROOT/opt/sahaj"
 
-          # 1. Copy the PyInstaller output (Notice the new folder name!)
+          # 1. Copy the PyInstaller output
           cp -r dist/Sahaj_3.0/* "$PKG_ROOT/opt/sahaj/"
 
-          # 2. Create the launcher script in /usr/bin/sahaj (Notice the new executable name!)
+          # 2. Create the launcher script in /usr/bin/sahaj
           cat > "$PKG_ROOT/usr/bin/sahaj" <<'EOF'
           #!/bin/bash
           cd /opt/sahaj
@@ -263,10 +263,31 @@ jobs:
           StartupWMClass=sahaj
           EOF
 
-          # 4. Copy the icon
+          # 4. Copy the icon to both standard locations
           cp header_icon.png "$PKG_ROOT/usr/share/icons/hicolor/256x256/apps/sahaj.png"
+          cp header_icon.png "$PKG_ROOT/usr/share/pixmaps/sahaj.png"
 
-          # 5. Create the control file (metadata & dependencies)
+          # 5. Create AppStream metadata (Required for modern App Center)
+          # NOTE: Change the URL below to your actual GitHub repository!
+          cat > "$PKG_ROOT/usr/share/metainfo/sahaj.metainfo.xml" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <component type="desktop-application">
+            <id>com.nazmuldev.sahaj</id>
+            <name>Sahaj</name>
+            <summary>AI Assamese Typing Tool</summary>
+            <metadata_license>CC0-1.0</metadata_license>
+            <project_license>Proprietary</project_license>
+            <description>
+              <p>A modern, feature-rich Assamese typing assistant built for legal professionals, writers, and anyone who needs to type in Assamese using English phonetics.</p>
+            </description>
+            <launchable type="desktop-id">sahaj.desktop</launchable>
+            <url type="homepage">https://sahajtyping.blogspot.com</url>
+            <developer_name>Nazmul Hussain</developer_name>
+            <content_rating type="oars-1.1" />
+          </component>
+          EOF
+
+          # 6. Create the control file (metadata & dependencies)
           cat > "$PKG_ROOT/DEBIAN/control" <<EOF
           Package: $APP_NAME
           Version: $VERSION
@@ -275,13 +296,14 @@ jobs:
           Architecture: $ARCH
           Depends: libportaudio2, libgl1, libegl1, libxkbcommon-x11-0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-shape0, libxcb-xinerama0, libxcb-cursor0, libdbus-1-3, libfontconfig1, fonts-noto-core, ffmpeg, libsndfile1
           Maintainer: Nazmul Hussain <hussainnazmul786@gmail.com>
+          Homepage: https://sahajtyping.blogspot.com/
           Description: AI Assamese Typing Tool
            A modern, feature-rich Assamese typing assistant built for
            legal professionals, writers, and anyone who needs to type
            in Assamese using English phonetics.
           EOF
 
-          # 6. Build the .deb file
+          # 7. Build the .deb file
           dpkg-deb --build --root-owner-group "$PKG_ROOT" "Sahaj-${VERSION}-${ARCH}.deb"
           echo "----- Installer created -----"
           ls -lh Sahaj-${VERSION}-${ARCH}.deb

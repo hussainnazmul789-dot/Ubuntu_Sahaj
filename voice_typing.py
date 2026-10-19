@@ -188,17 +188,35 @@ class VoiceRecorderWorker(QThread):
             self.is_recording = True
             self._stop_requested = False
             self.start_time = time.time()
-            self.stream = self.audio.open(
-                format=pyaudio.paInt16,
-                channels=1,
-                rate=16000,
-                input=True,
-                frames_per_buffer=1024,
-                stream_callback=self._callback
-            )
+            
+            # --- FALLBACK LOGIC FOR NEWER UBUNTU (PIPEWIRE) ---
+            try:
+                self.actual_rate = 16000
+                self.stream = self.audio.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=self.actual_rate,
+                    input=True,
+                    frames_per_buffer=1024,
+                    stream_callback=self._callback
+                )
+            except OSError:
+                log_error("16000 Hz not supported by default mic. Falling back to device default.")
+                default_info = self.audio.get_default_input_device_info()
+                self.actual_rate = int(default_info['defaultSampleRate'])
+                self.stream = self.audio.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=self.actual_rate,
+                    input=True,
+                    frames_per_buffer=1024,
+                    stream_callback=self._callback
+                )
+            # ---------------------------------------------------
+
             self.stream.start_stream()
             self.recording_started.emit()
-            log_error("Recording started.")
+            log_error(f"Recording started at {self.actual_rate} Hz.")
 
             while not self._stop_requested:
                 elapsed = time.time() - self.start_time
@@ -222,7 +240,7 @@ class VoiceRecorderWorker(QThread):
                 with wave.open(temp_filename, 'wb') as wf:
                     wf.setnchannels(1)
                     wf.setsampwidth(2)
-                    wf.setframerate(16000)
+                    wf.setframerate(self.actual_rate) # Use the actual rate here
                     wf.writeframes(b''.join(self.frames))
                 log_error(f"Recording saved to {temp_filename}")
                 self.recording_stopped.emit(temp_filename)
@@ -309,13 +327,32 @@ class VoiceTypingWorker(QThread):
                         sys.stderr = old_stderr
                         devnull.close()
 
+                # --- RESAMPLE AUDIO IF FALLBACK WAS USED ---
+                resampled_path = self.audio_filepath + ".16k.wav"
+                process_path = self.audio_filepath
+                try:
+                    import soundfile as sf
+                    import torch
+                    import torchaudio
+                    data, samplerate = sf.read(self.audio_filepath, dtype='int16')
+                    if samplerate != 16000:
+                        tensor = torch.from_numpy(data).float()
+                        resampled = torchaudio.functional.resample(tensor, orig_freq=samplerate, new_freq=16000)
+                        data = resampled.numpy().astype('int16')
+                        sf.write(resampled_path, data, 16000)
+                        process_path = resampled_path
+                        log_error("Audio successfully resampled to 16000 Hz.")
+                except Exception as e:
+                    log_error(f"Resampling failed, using original audio: {e}")
+                # -------------------------------------------
+
                 CHUNK_SECONDS = 12
                 OVERLAP_SECONDS = 0.5
                 SAMPLE_RATE = 16000
                 CHUNK_SAMPLES = CHUNK_SECONDS * SAMPLE_RATE
                 OVERLAP_SAMPLES = OVERLAP_SECONDS * SAMPLE_RATE
 
-                with wave.open(self.audio_filepath, 'rb') as wf:
+                with wave.open(process_path, 'rb') as wf:
                     raw_data = wf.readframes(wf.getnframes())
 
                 samples = array.array('h', raw_data)
@@ -404,8 +441,10 @@ class VoiceTypingWorker(QThread):
                 if os.path.exists(self.audio_filepath):
                     os.remove(self.audio_filepath)
                     log_error(f"Deleted main audio file: {self.audio_filepath}")
+                if 'resampled_path' in locals() and os.path.exists(resampled_path):
+                    os.remove(resampled_path)
             except Exception as e:
-                log_error(f"Failed to delete main audio file: {e}")
+                log_error(f"Failed to delete audio file: {e}")
 
 
 # ==================================================================

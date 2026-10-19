@@ -203,13 +203,10 @@ if __name__ == "__main__":
     setup_thread.start()
 
     # Create the main window — pass setup_thread so Xlit/ASR wait for it.
+    # DO NOT call show() or hide() here. Ubuntu 26's GNOME shell gets confused
+    # by quickly hiding a window and creates a ghost taskbar icon. The window
+    # will be shown properly in finish_startup() via showMaximized().
     main_window = AssameseTypingApp(setup_thread=setup_thread)
-    main_window.show()
-    app.processEvents()
-    # Hide immediately so nothing covers the splash. The window exists
-    # (Qt has initialized it), but the user only sees the splash until
-    # everything is ready.
-    main_window.hide()
 
     def finish_startup():
         def loaders_busy():

@@ -184,6 +184,16 @@ class VoiceRecorderWorker(QThread):
     def run(self):
         try:
             self.audio = pyaudio.PyAudio()
+            
+            # --- DEBUG: Print all available microphones to the log ---
+            log_error("--- AVAILABLE MICROPHONES ---")
+            for i in range(self.audio.get_device_count()):
+                dev = self.audio.get_device_info_by_index(i)
+                if dev['maxInputChannels'] > 0:
+                    log_error(f"ID {i}: {dev['name']} (Rate: {dev['defaultSampleRate']})")
+            log_error("-----------------------------")
+            # ---------------------------------------------------------
+
             self.frames = []
             self.is_recording = True
             self._stop_requested = False
@@ -235,15 +245,16 @@ class VoiceRecorderWorker(QThread):
                 self.audio = None
 
             if self.frames:
-                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-                temp_filename = temp_file.name
-                with wave.open(temp_filename, 'wb') as wf:
+                # Save to a permanent location in the Home folder for debugging
+                debug_filename = os.path.join(os.path.expanduser('~'), 'Sahaj_debug_raw.wav')
+                with wave.open(debug_filename, 'wb') as wf:
                     wf.setnchannels(1)
                     wf.setsampwidth(2)
-                    wf.setframerate(self.actual_rate) # Use the actual rate here
+                    wf.setframerate(self.actual_rate)
                     wf.writeframes(b''.join(self.frames))
-                log_error(f"Recording saved to {temp_filename}")
-                self.recording_stopped.emit(temp_filename)
+                
+                log_error(f"DEBUG: Raw recording saved to {debug_filename}")
+                self.recording_stopped.emit(debug_filename)
             else:
                 self.error.emit("No audio recorded.")
 
@@ -328,20 +339,27 @@ class VoiceTypingWorker(QThread):
                         devnull.close()
 
                 # --- RESAMPLE AUDIO IF FALLBACK WAS USED ---
-                resampled_path = self.audio_filepath + ".16k.wav"
+                resampled_path = os.path.join(os.path.expanduser('~'), 'Sahaj_debug_resampled.wav')
                 process_path = self.audio_filepath
                 try:
                     import soundfile as sf
                     import torch
                     import torchaudio
-                    data, samplerate = sf.read(self.audio_filepath, dtype='int16')
+                    
+                    # always_2d=False ensures we get a 1D array, preventing channel mix-ups
+                    data, samplerate = sf.read(self.audio_filepath, dtype='float32', always_2d=False)
+                    
                     if samplerate != 16000:
                         tensor = torch.from_numpy(data).float()
+                        # Resample requires the tensor to be at least 1D
                         resampled = torchaudio.functional.resample(tensor, orig_freq=samplerate, new_freq=16000)
-                        data = resampled.numpy().astype('int16')
-                        sf.write(resampled_path, data, 16000)
+                        data_16k = resampled.numpy()
+                        # Save for debugging
+                        sf.write(resampled_path, data_16k, 16000)
                         process_path = resampled_path
-                        log_error("Audio successfully resampled to 16000 Hz.")
+                        log_error(f"Audio successfully resampled from {samplerate} to 16000 Hz.")
+                    else:
+                        log_error("Audio is already 16000 Hz, no resampling needed.")
                 except Exception as e:
                     log_error(f"Resampling failed, using original audio: {e}")
                 # -------------------------------------------
@@ -437,14 +455,9 @@ class VoiceTypingWorker(QThread):
                 f"{os.path.join(os.path.expanduser('~'), 'sahaj_voice_error.log')}"
             )
         finally:
-            try:
-                if os.path.exists(self.audio_filepath):
-                    os.remove(self.audio_filepath)
-                    log_error(f"Deleted main audio file: {self.audio_filepath}")
-                if 'resampled_path' in locals() and os.path.exists(resampled_path):
-                    os.remove(resampled_path)
-            except Exception as e:
-                log_error(f"Failed to delete audio file: {e}")
+            # TEMPORARILY DISABLED FOR DEBUGGING
+            log_error("DEBUG MODE: Files were not deleted so you can listen to them.")
+            pass
 
 
 # ==================================================================

@@ -343,7 +343,20 @@ class VoiceTypingWorker(QThread):
 
                 # --- SINGLE PASS TRANSCRIPTION (No more chunking) ---
                 log_error("Starting transcription (single pass)...")
-                chunk_text = transcriber.transcribe_rnnt(process_path, "as")
+                
+                import inspect
+                sig = inspect.signature(transcriber.transcribe_rnnt)
+                
+                if 'vad_max_segment_duration' in sig.parameters:
+                    log_error("SUCCESS: vad_max_segment_duration parameter found! Setting to 24s.")
+                    chunk_text = transcriber.transcribe_rnnt(
+                        process_path, 
+                        "as", 
+                        vad_max_segment_duration=24
+                    )
+                else:
+                    log_error("WARNING: vad_max_segment_duration not found in this version of indic_asr_onnx. Using default VAD.")
+                    chunk_text = transcriber.transcribe_rnnt(process_path, "as")
                 
                 if chunk_text and chunk_text.strip():
                     self.finished.emit(chunk_text.strip())

@@ -216,9 +216,14 @@ class VoiceRecorderWorker(QThread):
                 
                 # Update level meter
                 try:
-                    chunk = self.frames[-int(self.actual_rate * 0.1):]
+                    current_sample = int(elapsed * self.actual_rate)
+                    start_sample = max(0, current_sample - int(self.actual_rate * 0.1))
+                    chunk = self.frames[start_sample:current_sample]
+                    
                     if len(chunk) > 0:
-                        rms = np.sqrt(np.mean(chunk.astype(np.float32)**2))
+                        # Flatten the chunk just in case, and cast to float32 for the math
+                        chunk = chunk.flatten().astype(np.float32)
+                        rms = np.sqrt(np.mean(chunk**2))
                         raw = rms / 32767.0
                         boosted = min(raw * 8.0, 1.0)
                         normalized = boosted ** 0.5
@@ -322,15 +327,12 @@ class VoiceTypingWorker(QThread):
                     import torch
                     import torchaudio
                     
-                    # always_2d=False ensures we get a 1D array, preventing channel mix-ups
                     data, samplerate = sf.read(self.audio_filepath, dtype='float32', always_2d=False)
                     
                     if samplerate != 16000:
                         tensor = torch.from_numpy(data).float()
-                        # Resample requires the tensor to be at least 1D
                         resampled = torchaudio.functional.resample(tensor, orig_freq=samplerate, new_freq=16000)
                         data_16k = resampled.numpy()
-                        # Save for debugging (force PCM_16 so the wave module can read it)
                         sf.write(resampled_path, data_16k, 16000, subtype='PCM_16')
                         process_path = resampled_path
                         log_error(f"Audio successfully resampled from {samplerate} to 16000 Hz.")
@@ -338,88 +340,15 @@ class VoiceTypingWorker(QThread):
                         log_error("Audio is already 16000 Hz, no resampling needed.")
                 except Exception as e:
                     log_error(f"Resampling failed, using original audio: {e}")
-                # -------------------------------------------
 
-                CHUNK_SECONDS = 12
-                OVERLAP_SECONDS = 0.5
-                SAMPLE_RATE = 16000
-                CHUNK_SAMPLES = CHUNK_SECONDS * SAMPLE_RATE
-                OVERLAP_SAMPLES = OVERLAP_SECONDS * SAMPLE_RATE
-
-                with wave.open(process_path, 'rb') as wf:
-                    raw_data = wf.readframes(wf.getnframes())
-
-                samples = array.array('h', raw_data)
-                total_samples = len(samples)
-
-                full_text = []
-                start_sample = 0
-                start_time = time.time()
-
-                while start_sample < total_samples:
-                    elapsed = time.time() - start_time
-                    if elapsed > self.timeout_seconds:
-                        log_error(f"Transcription timed out after {elapsed:.1f}s")
-                        self.error.emit(
-                            f"Transcription is taking too long (over {self.timeout_seconds} seconds).\n\n"
-                            "This can happen on slower computers.\n"
-                            "Please try:\n"
-                            "• Recording a shorter sentence (10‑15 seconds)\n"
-                            "• Closing other applications to free up memory\n"
-                            "• Restarting the app and trying again"
-                        )
-                        return
-
-                    end_sample = min(start_sample + CHUNK_SAMPLES, total_samples)
-                    start_idx = int(start_sample)
-                    end_idx = int(end_sample)
-                    chunk_samples = samples[start_idx:end_idx]
-
-                    temp_chunk = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-                    temp_chunk_path = temp_chunk.name
-                    temp_chunk.close()
-
-                    try:
-                        with wave.open(temp_chunk_path, 'wb') as wf_chunk:
-                            wf_chunk.setnchannels(1)
-                            wf_chunk.setsampwidth(2)
-                            wf_chunk.setframerate(SAMPLE_RATE)
-                            wf_chunk.writeframes(chunk_samples.tobytes())
-
-                        chunk_text = transcriber.transcribe_rnnt(temp_chunk_path, "as")
-                        if chunk_text and chunk_text.strip():
-                            full_text.append(chunk_text.strip())
-
-                    except Exception as e:
-                        log_error(f"Chunk transcription error: {e}")
-                    finally:
-                        for attempt in range(5):
-                            try:
-                                os.remove(temp_chunk_path)
-                                break
-                            except PermissionError:
-                                time.sleep(0.1 * (attempt + 1))
-                            except Exception as e:
-                                log_error(f"Failed to delete {temp_chunk_path}: {e}")
-                                break
-
-                    start_sample = int(start_sample + (CHUNK_SAMPLES - OVERLAP_SAMPLES))
-
-            if full_text:
-                deduped = []
-                prev = ""
-                for chunk in full_text:
-                    if prev:
-                        import difflib
-                        ratio = difflib.SequenceMatcher(None, prev, chunk).ratio()
-                        if ratio > 0.7:
-                            continue
-                    deduped.append(chunk)
-                    prev = chunk
-                combined = " ".join(deduped).strip()
-                self.finished.emit(combined)
-            else:
-                self.error.emit("Could not understand the audio. Please try again with clearer speech.")
+                # --- SINGLE PASS TRANSCRIPTION (No more chunking) ---
+                log_error("Starting transcription (single pass)...")
+                chunk_text = transcriber.transcribe_rnnt(process_path, "as")
+                
+                if chunk_text and chunk_text.strip():
+                    self.finished.emit(chunk_text.strip())
+                else:
+                    self.error.emit("Could not understand the audio. Please try again with clearer speech.")
 
         except Exception as e:
             error_msg = f"VoiceTypingWorker.run error: {str(e)}\n{traceback.format_exc()}"

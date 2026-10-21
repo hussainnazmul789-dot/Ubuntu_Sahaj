@@ -5,7 +5,8 @@ import tempfile
 import wave
 import traceback
 import array
-import pyaudio
+import sounddevice as sd
+import numpy as np
 import threading
 from contextlib import contextmanager
 from PySide6.QtCore import QThread, Signal, QTimer
@@ -163,7 +164,7 @@ def _asr_env_context():
 
 
 # ==================================================================
-# Voice Recorder
+# Voice Recorder (Powered by sounddevice for PipeWire compatibility)
 # ==================================================================
 class VoiceRecorderWorker(QThread):
     recording_started = Signal()
@@ -173,85 +174,75 @@ class VoiceRecorderWorker(QThread):
 
     def __init__(self, max_duration=24):
         super().__init__()
-        self.audio = None
-        self.stream = None
-        self.frames = []
-        self.is_recording = False
-        self._stop_requested = False
         self.max_duration = max_duration
+        self._stop_requested = False
+        self.actual_rate = 16000
+        self.frames = None
         self.start_time = None
 
     def run(self):
         try:
-            self.audio = pyaudio.PyAudio()
-            
-            # --- DEBUG: Print all available microphones to the log ---
-            log_error("--- AVAILABLE MICROPHONES ---")
-            for i in range(self.audio.get_device_count()):
-                dev = self.audio.get_device_info_by_index(i)
-                if dev['maxInputChannels'] > 0:
-                    log_error(f"ID {i}: {dev['name']} (Rate: {dev['defaultSampleRate']})")
-            log_error("-----------------------------")
-            # ---------------------------------------------------------
-
-            self.frames = []
-            self.is_recording = True
-            self._stop_requested = False
-            self.start_time = time.time()
-            
             # --- FALLBACK LOGIC FOR NEWER UBUNTU (PIPEWIRE) ---
             try:
+                # Try to use 16000 Hz
+                sd.check_input_settings(samplerate=16000, channels=1)
                 self.actual_rate = 16000
-                self.stream = self.audio.open(
-                    format=pyaudio.paInt16,
-                    channels=1,
-                    rate=self.actual_rate,
-                    input=True,
-                    frames_per_buffer=1024,
-                    stream_callback=self._callback
-                )
-            except OSError:
+            except Exception:
                 log_error("16000 Hz not supported by default mic. Falling back to device default.")
-                default_info = self.audio.get_default_input_device_info()
-                self.actual_rate = int(default_info['defaultSampleRate'])
-                self.stream = self.audio.open(
-                    format=pyaudio.paInt16,
-                    channels=1,
-                    rate=self.actual_rate,
-                    input=True,
-                    frames_per_buffer=1024,
-                    stream_callback=self._callback
-                )
+                device_info = sd.query_devices(kind='input')
+                self.actual_rate = int(device_info['default_samplerate'])
             # ---------------------------------------------------
 
-            self.stream.start_stream()
+            log_error(f"Recording started at {self.actual_rate} Hz via sounddevice.")
+            self.start_time = time.time()
+            self._stop_requested = False
+            
             self.recording_started.emit()
-            log_error(f"Recording started at {self.actual_rate} Hz.")
 
+            # Start recording in the background
+            self.frames = sd.rec(
+                int(self.max_duration * self.actual_rate),
+                samplerate=self.actual_rate,
+                channels=1,
+                dtype='int16',
+                blocking=False
+            )
+
+            # Wait loop (handles stop request and updates UI level)
             while not self._stop_requested:
                 elapsed = time.time() - self.start_time
                 if elapsed >= self.max_duration:
-                    log_error(f"Reached max duration ({self.max_duration}s), stopping.")
                     break
-                self.msleep(100)
+                
+                # Update level meter
+                try:
+                    chunk = self.frames[-int(self.actual_rate * 0.1):]
+                    if len(chunk) > 0:
+                        rms = np.sqrt(np.mean(chunk.astype(np.float32)**2))
+                        raw = rms / 32767.0
+                        boosted = min(raw * 8.0, 1.0)
+                        normalized = boosted ** 0.5
+                        self.level_update.emit(normalized)
+                except Exception:
+                    pass
+                time.sleep(0.1)
 
-            self.is_recording = False
-            if self.stream:
-                self.stream.stop_stream()
-                self.stream.close()
-                self.stream = None
-            if self.audio:
-                self.audio.terminate()
-                self.audio = None
+            # Stop the stream
+            sd.stop()
 
-            if self.frames:
+            # Trim audio based on actual recorded time
+            actual_samples = int((time.time() - self.start_time) * self.actual_rate)
+            if actual_samples < len(self.frames):
+                self.frames = self.frames[:actual_samples]
+                
+            # CRITICAL: Flatten the 2D array (samples, channels) into a 1D array
+            self.frames = self.frames.flatten()
+
+            if len(self.frames) > 0:
                 # Save to a permanent location in the Home folder for debugging
                 debug_filename = os.path.join(os.path.expanduser('~'), 'Sahaj_debug_raw.wav')
-                with wave.open(debug_filename, 'wb') as wf:
-                    wf.setnchannels(1)
-                    wf.setsampwidth(2)
-                    wf.setframerate(self.actual_rate)
-                    wf.writeframes(b''.join(self.frames))
+                import soundfile as sf
+                sf.write(debug_filename, self.frames, self.actual_rate)
                 
                 log_error(f"DEBUG: Raw recording saved to {debug_filename}")
                 self.recording_stopped.emit(debug_filename)
@@ -262,21 +253,6 @@ class VoiceRecorderWorker(QThread):
             error_msg = f"Recording error: {str(e)}\n{traceback.format_exc()}"
             log_error(error_msg)
             self.error.emit(error_msg)
-
-    def _callback(self, in_data, frame_count, time_info, status):
-        if self.is_recording:
-            self.frames.append(in_data)
-            try:
-                samples = array.array('h', in_data)
-                if samples:
-                    rms = (sum(s * s for s in samples) / len(samples)) ** 0.5
-                    raw = rms / 32767.0
-                    boosted = min(raw * 8.0, 1.0)
-                    normalized = boosted ** 0.5
-                    self.level_update.emit(normalized)
-            except Exception:
-                pass
-        return (in_data, pyaudio.paContinue)
 
     def stop(self):
         self._stop_requested = True
@@ -354,8 +330,8 @@ class VoiceTypingWorker(QThread):
                         # Resample requires the tensor to be at least 1D
                         resampled = torchaudio.functional.resample(tensor, orig_freq=samplerate, new_freq=16000)
                         data_16k = resampled.numpy()
-                        # Save for debugging
-                        sf.write(resampled_path, data_16k, 16000)
+                        # Save for debugging (force PCM_16 so the wave module can read it)
+                        sf.write(resampled_path, data_16k, 16000, subtype='PCM_16')
                         process_path = resampled_path
                         log_error(f"Audio successfully resampled from {samplerate} to 16000 Hz.")
                     else:

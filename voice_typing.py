@@ -312,7 +312,7 @@ class VoiceTypingWorker(QThread):
                     sys.stdout = devnull
                     sys.stderr = devnull
                     try:
-                        transcriber = IndicTranscriber()
+                        transcriber = IndicTranscriber(vad_max_segment_duration=24)
                         log_error("IndicTranscriber initialized on demand.")
                     finally:
                         sys.stdout = old_stdout
@@ -398,7 +398,7 @@ def load_transcriber():
         sys.stderr = devnull
         try:
             log_error("Pre-loading IndicTranscriber (startup)...")
-            transcriber = IndicTranscriber()
+            transcriber = IndicTranscriber(vad_max_segment_duration=24)
             log_error("Pre-loading IndicTranscriber: SUCCESS.")
             _warm_up_transcriber(transcriber)
             return transcriber

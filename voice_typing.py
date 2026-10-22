@@ -347,9 +347,14 @@ class VoiceTypingWorker(QThread):
                 # Read the 16kHz audio
                 audio_data, sr = sf.read(process_path, dtype='int16')
                 
-                # We chunk into 10-second pieces with 2 seconds of overlap.
-                CHUNK_DURATION = 10 
-                OVERLAP = 2         
+                # Add 0.5s of silence to the end to prevent auto-stop hallucination
+                audio_data = np.pad(audio_data, (0, 8000), 'constant')
+                
+                # We chunk into 8-second pieces with a huge 3-second overlap.
+                # 8s ensures we stay safely under the AI's internal 15s limit.
+                # 3s overlap gives the AI plenty of context to stitch cut words.
+                CHUNK_DURATION = 8 
+                OVERLAP = 3         
                 CHUNK_SAMPLES = CHUNK_DURATION * 16000
                 OVERLAP_SAMPLES = OVERLAP * 16000
                 

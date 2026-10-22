@@ -344,11 +344,6 @@ class VoiceTypingWorker(QThread):
                 # --- MANUAL SMART CHUNKING (Bypassing the internal 15s VAD limit) ---
                 log_error("Starting manual smart chunking...")
                 
-                import soundfile as sf
-                import numpy as np
-                import tempfile
-                import wave
-                
                 # Read the 16kHz audio
                 audio_data, sr = sf.read(process_path, dtype='int16')
                 

@@ -348,7 +348,6 @@ class VoiceTypingWorker(QThread):
                 audio_data, sr = sf.read(process_path, dtype='int16')
                 
                 # We chunk into 10-second pieces with 2 seconds of overlap.
-                # 10s ensures we stay safely under the AI's internal 15s limit.
                 CHUNK_DURATION = 10 
                 OVERLAP = 2         
                 CHUNK_SAMPLES = CHUNK_DURATION * 16000
@@ -385,24 +384,35 @@ class VoiceTypingWorker(QThread):
                     # Move start index forward by (chunk size - overlap)
                     start_idx += (CHUNK_SAMPLES - OVERLAP_SAMPLES)
 
-                # --- SMART MERGE (De-duplication) ---
+                # --- SMART MERGE (Fuzzy Character Overlap) ---
                 if not transcripts:
                     self.error.emit("Could not understand the audio. Please try again with clearer speech.")
                     return
                     
                 final_text = transcripts[0]
                 for i in range(1, len(transcripts)):
-                    prev_words = final_text.split()
-                    curr_words = transcripts[i].split()
+                    prev_text = final_text
+                    curr_text = transcripts[i]
                     
-                    # Find the longest overlap between the end of prev and start of current
-                    max_overlap = 0
-                    for j in range(1, min(len(prev_words), len(curr_words), 15) + 1):
-                        if prev_words[-j:] == curr_words[:j]:
-                            max_overlap = j
+                    # Find the longest overlap by checking characters
+                    max_overlap_len = 0
+                    # We check backwards from the end of prev_text (up to 40 characters)
+                    for length in range(1, min(len(prev_text), len(curr_text), 40) + 1):
+                        if prev_text[-length:] == curr_text[:length]:
+                            max_overlap_len = length
                             
-                    # Append only the part that doesn't overlap
-                    final_text += " " + " ".join(curr_words[max_overlap:])
+                    # If we found a solid overlap (at least 3 characters to avoid false positives)
+                    if max_overlap_len >= 3:
+                        final_text += curr_text[max_overlap_len:]
+                    else:
+                        # Fallback to word matching if characters didn't align exactly
+                        prev_words = prev_text.split()
+                        curr_words = curr_text.split()
+                        max_word_overlap = 0
+                        for j in range(1, min(len(prev_words), len(curr_words), 10) + 1):
+                            if prev_words[-j:] == curr_words[:j]:
+                                max_word_overlap = j
+                        final_text += " " + " ".join(curr_words[max_word_overlap:])
 
                 log_error("Transcription complete.")
                 self.finished.emit(final_text.strip())

@@ -312,7 +312,7 @@ class VoiceTypingWorker(QThread):
                     sys.stdout = devnull
                     sys.stderr = devnull
                     try:
-                        transcriber = IndicTranscriber(vad_max_segment_duration=24)
+                        transcriber = IndicTranscriber()
                         log_error("IndicTranscriber initialized on demand.")
                     finally:
                         sys.stdout = old_stdout
@@ -341,27 +341,76 @@ class VoiceTypingWorker(QThread):
                 except Exception as e:
                     log_error(f"Resampling failed, using original audio: {e}")
 
-                # --- SINGLE PASS TRANSCRIPTION (No more chunking) ---
-                log_error("Starting transcription (single pass)...")
+                # --- MANUAL SMART CHUNKING (Bypassing the internal 15s VAD limit) ---
+                log_error("Starting manual smart chunking...")
                 
-                import inspect
-                sig = inspect.signature(transcriber.transcribe_rnnt)
+                import soundfile as sf
+                import numpy as np
+                import tempfile
+                import wave
                 
-                if 'vad_max_segment_duration' in sig.parameters:
-                    log_error("SUCCESS: vad_max_segment_duration parameter found! Setting to 24s.")
-                    chunk_text = transcriber.transcribe_rnnt(
-                        process_path, 
-                        "as", 
-                        vad_max_segment_duration=24
-                    )
-                else:
-                    log_error("WARNING: vad_max_segment_duration not found in this version of indic_asr_onnx. Using default VAD.")
-                    chunk_text = transcriber.transcribe_rnnt(process_path, "as")
+                # Read the 16kHz audio
+                audio_data, sr = sf.read(process_path, dtype='int16')
                 
-                if chunk_text and chunk_text.strip():
-                    self.finished.emit(chunk_text.strip())
-                else:
+                # We chunk into 10-second pieces with 2 seconds of overlap.
+                # 10s ensures we stay safely under the AI's internal 15s limit.
+                CHUNK_DURATION = 10 
+                OVERLAP = 2         
+                CHUNK_SAMPLES = CHUNK_DURATION * 16000
+                OVERLAP_SAMPLES = OVERLAP * 16000
+                
+                transcripts = []
+                start_idx = 0
+                
+                while start_idx < len(audio_data):
+                    end_idx = min(start_idx + CHUNK_SAMPLES, len(audio_data))
+                    chunk = audio_data[start_idx:end_idx]
+                    
+                    # Save chunk to temp file
+                    tmp_chunk = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+                    tmp_path = tmp_chunk.name
+                    tmp_chunk.close()
+                    
+                    with wave.open(tmp_path, 'wb') as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)
+                        wf.setframerate(16000)
+                        wf.writeframes(chunk.tobytes())
+                        
+                    # Transcribe the chunk
+                    text = transcriber.transcribe_rnnt(tmp_path, "as")
+                    if text and text.strip():
+                        transcripts.append(text.strip())
+                        
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+                        
+                    # Move start index forward by (chunk size - overlap)
+                    start_idx += (CHUNK_SAMPLES - OVERLAP_SAMPLES)
+
+                # --- SMART MERGE (De-duplication) ---
+                if not transcripts:
                     self.error.emit("Could not understand the audio. Please try again with clearer speech.")
+                    return
+                    
+                final_text = transcripts[0]
+                for i in range(1, len(transcripts)):
+                    prev_words = final_text.split()
+                    curr_words = transcripts[i].split()
+                    
+                    # Find the longest overlap between the end of prev and start of current
+                    max_overlap = 0
+                    for j in range(1, min(len(prev_words), len(curr_words), 15) + 1):
+                        if prev_words[-j:] == curr_words[:j]:
+                            max_overlap = j
+                            
+                    # Append only the part that doesn't overlap
+                    final_text += " " + " ".join(curr_words[max_overlap:])
+
+                log_error("Transcription complete.")
+                self.finished.emit(final_text.strip())
 
         except Exception as e:
             error_msg = f"VoiceTypingWorker.run error: {str(e)}\n{traceback.format_exc()}"
@@ -398,7 +447,7 @@ def load_transcriber():
         sys.stderr = devnull
         try:
             log_error("Pre-loading IndicTranscriber (startup)...")
-            transcriber = IndicTranscriber(vad_max_segment_duration=24)
+            transcriber = IndicTranscriber()
             log_error("Pre-loading IndicTranscriber: SUCCESS.")
             _warm_up_transcriber(transcriber)
             return transcriber

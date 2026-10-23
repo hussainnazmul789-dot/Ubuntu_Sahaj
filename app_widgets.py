@@ -345,9 +345,24 @@ class PhoneticTextEdit(QPlainTextEdit):
         main_win = self.window()
         xlit_engine = getattr(main_win, 'xlit_engine', None)
         mode = getattr(main_win, 'translation_mode', 'google')
-        self.translator = TranslationWorker(word, xlit_engine=xlit_engine, mode=mode)
-        self.translator.finished.connect(self.handle_translation)
-        self.translator.start()
+        
+        # Keep a reference to all running threads so Python doesn't garbage collect them
+        if not hasattr(self, "_active_translators"):
+            self._active_translators = []
+            
+        worker = TranslationWorker(word, xlit_engine=xlit_engine, mode=mode)
+        self._active_translators.append(worker)
+        
+        # Clean up the list when the thread finishes
+        def cleanup(w=worker):
+            try:
+                self._active_translators.remove(w)
+            except ValueError:
+                pass
+                
+        worker.finished.connect(cleanup)
+        worker.finished.connect(self.handle_translation)
+        worker.start()
 
     def handle_translation(self, suggestions, original_word):
         if not suggestions:

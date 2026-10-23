@@ -26,11 +26,13 @@ class TranslationWorker(QThread):
 
     def run(self):
         use_google_first = (self.mode == "google")
+        import requests # Ensure requests is imported locally
 
         if use_google_first:
             try:
                 url = f"https://inputtools.google.com/request?text={self.word}&itc=as-t-i0-und&num=10&cp=0&cs=1&ie=utf-8&oe=utf-8&app=demopage"
-                response = app_utils.session.get(url, timeout=3)
+                # Use requests.get directly, NOT the global app_utils.session
+                response = requests.get(url, timeout=3)
                 data = response.json()
                 if data[0] == "SUCCESS":
                     suggestions = data[1][0][1]
@@ -74,7 +76,7 @@ class TranslationWorker(QThread):
 
             try:
                 url = f"https://inputtools.google.com/request?text={self.word}&itc=as-t-i0-und&num=10&cp=0&cs=1&ie=utf-8&oe=utf-8&app=demopage"
-                response = app_utils.session.get(url, timeout=3)
+                response = requests.get(url, timeout=3)
                 data = response.json()
                 if data[0] == "SUCCESS":
                     suggestions = data[1][0][1]

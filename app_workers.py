@@ -4,6 +4,8 @@ import json
 import traceback
 import threading
 import requests
+# Force the requests library to use IPv4, eliminating the 1-2 second IPv6 timeout on Linux.
+requests.packages.urllib3.util.connection.HAS_IPV6 = False
 import requests.packages.urllib3.util.connection as urllib3_cn
 import socket
 

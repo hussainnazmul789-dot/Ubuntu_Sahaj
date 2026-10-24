@@ -346,14 +346,16 @@ class PhoneticTextEdit(QPlainTextEdit):
         xlit_engine = getattr(main_win, 'xlit_engine', None)
         mode = getattr(main_win, 'translation_mode', 'google')
         
-        # Keep a reference to all running threads so Python doesn't garbage collect them
         if not hasattr(self, "_active_translators"):
             self._active_translators = []
             
-        worker = TranslationWorker(word, xlit_engine=xlit_engine, mode=mode)
+        # Pass the exact positions to the worker
+        start_pos = self.last_word_start
+        end_pos = self.last_word_end
+        
+        worker = TranslationWorker(word, start_pos, end_pos, xlit_engine=xlit_engine, mode=mode)
         self._active_translators.append(worker)
         
-        # Clean up the list when the thread finishes
         def cleanup(w=worker):
             try:
                 self._active_translators.remove(w)
@@ -364,15 +366,27 @@ class PhoneticTextEdit(QPlainTextEdit):
         worker.finished.connect(self.handle_translation)
         worker.start()
 
-    def handle_translation(self, suggestions, original_word):
+    def handle_translation(self, suggestions, original_word, start_pos, end_pos):
         if not suggestions:
             return
-        cursor = self.textCursor()
-        cursor.setPosition(self.last_word_start)
-        cursor.setPosition(self.last_word_end, QTextCursor.MoveMode.KeepAnchor)
 
+        # 1. Safety check: Did the user already type over this word?
+        current_text = self.toPlainText()
+        if start_pos >= len(current_text) or end_pos > len(current_text):
+            return
+        if current_text[start_pos:end_pos] != original_word:
+            # The text changed while we were waiting for the network. Abort!
+            return
+
+        # 2. Use a background cursor so we don't hijack the user's typing cursor
+        cursor = QTextCursor(self.document())
+        cursor.setPosition(start_pos)
+        cursor.setPosition(end_pos, QTextCursor.MoveMode.KeepAnchor)
+        
         cursor.insertText(suggestions[0])
-        self.last_word_end = self.last_word_start + len(suggestions[0])
+        
+        # 3. Note: We deliberately do NOT call self.setTextCursor(cursor)
+        # and we do NOT update self.last_word_start here, so the user's typing flow is uninterrupted.
 
         display_suggestions = suggestions[:]
         if self.pending_punctuation:

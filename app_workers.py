@@ -2,6 +2,13 @@
 import os
 import json
 import traceback
+import socket
+import requests.packages.urllib3.util.connection as urllib3_cn
+
+# Force IPv4 to prevent Ubuntu's 1-2 second IPv6 timeout delay
+def allowed_gai_family():
+    return socket.AF_INET
+urllib3_cn.allowed_gai_family = allowed_gai_family
 
 import requests
 from PySide6.QtCore import QThread, Signal
@@ -16,27 +23,28 @@ from app_utils import (
 
 
 class TranslationWorker(QThread):
-    finished = Signal(list, str)
+    # We added start_pos and end_pos to the signal
+    finished = Signal(list, str, int, int)
 
-    def __init__(self, word, xlit_engine=None, mode="google"):
+    def __init__(self, word, start_pos, end_pos, xlit_engine=None, mode="google"):
         super().__init__()
         self.word = word
+        self.start_pos = start_pos
+        self.end_pos = end_pos
         self.xlit_engine = xlit_engine
         self.mode = mode
 
     def run(self):
         use_google_first = (self.mode == "google")
-        import requests # Ensure requests is imported locally
 
         if use_google_first:
             try:
                 url = f"https://inputtools.google.com/request?text={self.word}&itc=as-t-i0-und&num=10&cp=0&cs=1&ie=utf-8&oe=utf-8&app=demopage"
-                # Use requests.get directly, NOT the global app_utils.session
                 response = requests.get(url, timeout=3)
                 data = response.json()
                 if data[0] == "SUCCESS":
                     suggestions = data[1][0][1]
-                    self.finished.emit(suggestions, self.word)
+                    self.finished.emit(suggestions, self.word, self.start_pos, self.end_pos)
                     return
             except Exception:
                 pass
@@ -52,11 +60,10 @@ class TranslationWorker(QThread):
                     elif isinstance(res, list):
                         suggestions = res
                     if suggestions:
-                        self.finished.emit(suggestions, self.word)
+                        self.finished.emit(suggestions, self.word, self.start_pos, self.end_pos)
                         return
                 except Exception as e:
                     print("XlitEngine execution error:", e)
-
         else:
             if self.xlit_engine:
                 try:
@@ -69,7 +76,7 @@ class TranslationWorker(QThread):
                     elif isinstance(res, list):
                         suggestions = res
                     if suggestions:
-                        self.finished.emit(suggestions, self.word)
+                        self.finished.emit(suggestions, self.word, self.start_pos, self.end_pos)
                         return
                 except Exception as e:
                     print("XlitEngine execution error:", e)
@@ -80,12 +87,12 @@ class TranslationWorker(QThread):
                 data = response.json()
                 if data[0] == "SUCCESS":
                     suggestions = data[1][0][1]
-                    self.finished.emit(suggestions, self.word)
+                    self.finished.emit(suggestions, self.word, self.start_pos, self.end_pos)
                     return
             except Exception:
                 pass
 
-        self.finished.emit([self.word], self.word)
+        self.finished.emit([self.word], self.word, self.start_pos, self.end_pos)
 
 
 class SpellCheckWorker(QThread):

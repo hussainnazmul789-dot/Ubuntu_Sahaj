@@ -370,24 +370,41 @@ class PhoneticTextEdit(QPlainTextEdit):
         if not suggestions:
             return
 
-        # 1. Safety check: Did the user already type over this word?
-        current_text = self.toPlainText()
-        if start_pos >= len(current_text) or end_pos > len(current_text):
-            return
-        if current_text[start_pos:end_pos] != original_word:
-            # The text changed while we were waiting for the network. Abort!
-            return
-
-        # 2. Use a background cursor so we don't hijack the user's typing cursor
+        # 1. Use a background cursor so we don't hijack the user's typing cursor
         cursor = QTextCursor(self.document())
         cursor.setPosition(start_pos)
         cursor.setPosition(end_pos, QTextCursor.MoveMode.KeepAnchor)
         
-        cursor.insertText(suggestions[0])
-        
-        # 3. Note: We deliberately do NOT call self.setTextCursor(cursor)
-        # and we do NOT update self.last_word_start here, so the user's typing flow is uninterrupted.
+        # 2. Check if the word is exactly where it was
+        if cursor.selectedText() == original_word:
+            cursor.insertText(suggestions[0])
+        else:
+            # 3. The user typed past it and the text shifted!
+            # Find the closest occurrence of the English word dynamically.
+            current_text = self.toPlainText()
+            best_idx = -1
+            min_dist = 999999
+            start_idx = 0
+            
+            while True:
+                idx = current_text.find(original_word, start_idx)
+                if idx == -1:
+                    break
+                dist = abs(idx - start_pos)
+                if dist < min_dist:
+                    min_dist = dist
+                    best_idx = idx
+                start_idx = idx + 1
+            
+            # Only replace if we found a close match (prevents replacing the wrong word)
+            if best_idx != -1 and min_dist < 100:
+                cursor.setPosition(best_idx)
+                cursor.setPosition(best_idx + len(original_word), QTextCursor.MoveMode.KeepAnchor)
+                cursor.insertText(suggestions[0])
+            else:
+                return
 
+        # 4. Note: We deliberately do NOT call self.setTextCursor(cursor)
         display_suggestions = suggestions[:]
         if self.pending_punctuation:
             display_suggestions = [s + self.pending_punctuation for s in suggestions]

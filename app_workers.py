@@ -2,15 +2,11 @@
 import os
 import json
 import traceback
-import socket
-import requests.packages.urllib3.util.connection as urllib3_cn
-
-# Force IPv4 to prevent Ubuntu's 1-2 second IPv6 timeout delay
-def allowed_gai_family():
-    return socket.AF_INET
-urllib3_cn.allowed_gai_family = allowed_gai_family
-
+import threading
 import requests
+import requests.packages.urllib3.util.connection as urllib3_cn
+import socket
+
 from PySide6.QtCore import QThread, Signal
 
 import app_utils
@@ -21,6 +17,16 @@ from app_utils import (
     setup_default_models,
 )
 
+# --- ROCK SOLID NETWORK FIX ---
+# Force IPv4 to skip Ubuntu's slow IPv6 fallback
+def allowed_gai_family():
+    return socket.AF_INET
+urllib3_cn.allowed_gai_family = allowed_gai_family
+
+# Create a global session to reuse the TCP connection (TLS handshake)
+_global_session = requests.Session()
+_session_lock = threading.Lock()
+# -----------------------------
 
 class TranslationWorker(QThread):
     # We added start_pos and end_pos to the signal
@@ -40,7 +46,9 @@ class TranslationWorker(QThread):
         if use_google_first:
             try:
                 url = f"https://inputtools.google.com/request?text={self.word}&itc=as-t-i0-und&num=10&cp=0&cs=1&ie=utf-8&oe=utf-8&app=demopage"
-                response = requests.get(url, timeout=3)
+                # Use the global session with a lock to reuse connections
+                with _session_lock:
+                    response = _global_session.get(url, timeout=3)
                 data = response.json()
                 if data[0] == "SUCCESS":
                     suggestions = data[1][0][1]
@@ -83,7 +91,8 @@ class TranslationWorker(QThread):
 
             try:
                 url = f"https://inputtools.google.com/request?text={self.word}&itc=as-t-i0-und&num=10&cp=0&cs=1&ie=utf-8&oe=utf-8&app=demopage"
-                response = requests.get(url, timeout=3)
+                with _session_lock:
+                    response = _global_session.get(url, timeout=3)
                 data = response.json()
                 if data[0] == "SUCCESS":
                     suggestions = data[1][0][1]

@@ -6,7 +6,7 @@ import unicodedata
 
 from PySide6.QtWidgets import (
     QMainWindow, QMessageBox, QInputDialog, QDialog, QVBoxLayout,
-    QPushButton, QLabel, QTextEdit, QApplication, QLayout,
+    QPushButton, QLabel, QTextEdit, QTextBrowser, QApplication, QLayout,
 )
 from PySide6.QtCore import Qt, QTimer, QSettings, QThread
 from PySide6.QtGui import QFont, QIcon, QColor, QTextCursor, QTextCharFormat, QPixmap
@@ -618,7 +618,7 @@ class AssameseTypingApp(UIMixin, VoiceMixin, QMainWindow):
     def show_about_dialog(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("About সহজ-Sahaj")
-        dialog.setMinimumSize(550, 0)
+        dialog.setFixedSize(660, 800)
         dialog.setStyleSheet(self.styleSheet())
 
         layout = QVBoxLayout(dialog)
@@ -631,7 +631,7 @@ class AssameseTypingApp(UIMixin, VoiceMixin, QMainWindow):
         layout.addWidget(title)
 
         desc = QLabel(
-            "A modern, feature‑rich Assamese typing assistant built for "
+            "A modern, feature-rich Assamese typing assistant built for "
             "legal professionals, writers, and anyone who needs to type "
             "in Assamese using English phonetics."
         )
@@ -640,49 +640,93 @@ class AssameseTypingApp(UIMixin, VoiceMixin, QMainWindow):
         desc.setFont(QFont("Arial", 10))
         layout.addWidget(desc)
 
-        sep = QLabel()
-        sep.setFixedHeight(1)
-        sep.setStyleSheet("background-color: #ADB5BD;")
-        layout.addWidget(sep)
+        content = QTextBrowser()
+        content.setOpenExternalLinks(True)
+        content.setFont(QFont("Arial", 10))
+        content.setStyleSheet(
+            "QTextBrowser {"
+            "  border: 1px solid #ADB5BD;"
+            "  border-radius: 6px;"
+            "  padding: 10px 14px;"
+            "  background-color: transparent;"
+            "}"
+        )
+        content.setHtml("""
+<div style="font-family: Arial, sans-serif;">
 
-        features_label = QLabel("✨ <b>Features</b>")
-        features_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        layout.addWidget(features_label)
-
-        features_text = QTextEdit()
-        features_text.setReadOnly(True)
-        features_text.setFont(QFont("Arial", 10))
-        features_text.setHtml("""
+<h3>✨ Features</h3>
 <ul>
-<li>🌐 <b>Online and Offline Transliteration</b> — Powered by Google-AI and AI-Xlit Engine.</li>
-<li>🔤 <b>Phonetic Typing</b> — Type English (e.g., <i>bhuktobhugi</i>) and get instant Assamese.</li>
-<li>🔤 <b>Voice Typing</b> — Dictate on the go! High-precision offline voice recognition.</li>
-<li>✅ <b>Mouse Typing</b> — Click your way to perfect Assamese sentences.</li>
-<li>✅ <b>Inscript Typing</b> — Seamless Inscript integration.</li>
-<li>📖 <b>Spell & Grammar Checking</b> — Smart diagnostics with instant fixes.</li>
-<li>✅ <b>English to Assamese Translation</b> — Seamless conversion into the editor.</li>
-<li>✅ <b>Assamese to English Translation</b> — Explore definitions without interrupting workflow.</li>
-<li>🧩 <b>Draggable Helper Buttons</b> — One‑click insertion of frequently used phrases.</li>
-<li>💾 <b>Autosave</b> — Your work is saved automatically every 4 seconds.</li>
-<li>🌗 <b>Light / Dark Theme</b> — Toggle between modes with one click.</li>
+  <li>🌐 <b>Online &amp; Offline Transliteration</b> — Built-in AI-Xlit engine + optional Live AI (Google).</li>
+  <li>🔤 <b>Phonetic Typing</b> — Type English (e.g., <i>bhuktobhugi</i>) and get instant Assamese.</li>
+  <li>🎤 <b>Voice Typing</b> — Dictate in Assamese with fully offline AI recognition.</li>
+  <li>✅ <b>Mouse Typing</b> — Click your way to perfect Assamese sentences.</li>
+  <li>✅ <b>InScript Typing</b> — Seamless InScript keyboard integration.</li>
+  <li>📖 <b>Spell &amp; Grammar Checking</b> — Smart diagnostics with instant fixes.</li>
+  <li>✅ <b>English → Assamese Translation</b> — Online, currently in <b>Beta</b>.</li>
+  <li>✅ <b>Assamese → English Meaning</b> — Online, currently in <b>Beta</b>.</li>
+  <li>🧩 <b>Draggable Helper Buttons</b> — One-click insertion of frequently used phrases.</li>
+  <li>💾 <b>Autosave &amp; Recovery</b> — Your work is saved every few seconds.</li>
+  <li>🌗 <b>Light / Dark Theme</b> — Toggle between modes with one click.</li>
 </ul>
+
+<h3>🌐 Third-Party Services Notice</h3>
+<p>
+  <b>Live AI Transliteration — powered by Google Input Tools.</b><br/>
+  The "Live AI" mode uses Google's public Input Tools API, a third-party
+  service provided by Google LLC. It works because Google offers a public
+  endpoint, which may change, be rate-limited, or be discontinued at any
+  time by Google. <b>Live AI is a bonus convenience feature and is NOT
+  covered by your license fee.</b> Sahaj is not affiliated with or endorsed
+  by Google LLC. Please do not type confidential or sensitive text into
+  Live AI.
+</p>
+<p>
+  <b>Translation (English ↔ Assamese) — Beta / Experimental.</b><br/>
+  The translation boxes use the MyMemory public API, a third-party online
+  service. This feature is currently in <b>Beta</b> — results may be
+  inaccurate, incomplete, or temporarily unavailable. Please don't rely on
+  it for confidential, legal, or official documents.
+</p>
+<p>
+  <b>Offline Features.</b><br/>
+  Every other feature — Phonetic typing (offline mode), Voice typing,
+  Mouse typing, InScript, spell check, and hover dictionary — works
+  entirely offline and never sends data anywhere.
+</p>
+
+<h3>📄 Legal &amp; Policies</h3>
+<p>
+  Please read the following pages for a full explanation of what you can
+  expect, how your data is handled, and the terms of your license:
+</p>
+<ul>
+  <li>🌐 <b>Website:</b>
+      <a href="https://sahaj-ai.github.io/">https://sahaj-ai.github.io/</a></li>
+  <li>🔒 <b>Privacy Policy:</b>
+      <a href="https://sahaj-ai.github.io/privacy.html">https://sahaj-ai.github.io/privacy.html</a></li>
+  <li>📄 <b>Terms &amp; Conditions:</b>
+      <a href="https://sahaj-ai.github.io/terms.html">https://sahaj-ai.github.io/terms.html</a></li>
+  <li>⚠️ <b>Disclaimer:</b>
+      <a href="https://sahaj-ai.github.io/disclaimer.html">https://sahaj-ai.github.io/disclaimer.html</a></li>
+</ul>
+
+</div>
         """)
-        features_text.setMaximumHeight(280)
-        layout.addWidget(features_text)
+        layout.addWidget(content)
 
         credit = QLabel(
             "👨‍💻 Developed by <b>Nazmul Hussain</b><br>"
-            "Contact Me: hussainnazmul786@gmail.com"
+            "Contact: hussainnazmul786@gmail.com"
         )
         credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         credit.setFont(QFont("Arial", 10))
         layout.addWidget(credit)
+
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(dialog.accept)
         layout.addWidget(close_btn)
-        dialog.layout().setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
-        dialog.exec()
 
+        dialog.exec()
 
     def show_support_dialog(self):
         dialog = QDialog(self)

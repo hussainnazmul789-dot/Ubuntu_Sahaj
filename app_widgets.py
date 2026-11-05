@@ -375,12 +375,19 @@ class PhoneticTextEdit(QPlainTextEdit):
         cursor.setPosition(start_pos)
         cursor.setPosition(end_pos, QTextCursor.MoveMode.KeepAnchor)
         
+        # Helper to calculate the clean length without punctuation
+        clean_suggestion = suggestions[0]
+        if self.pending_punctuation and clean_suggestion.endswith(self.pending_punctuation):
+            clean_suggestion = clean_suggestion[:-len(self.pending_punctuation)]
+
         # 2. Check if the word is exactly where it was
         if cursor.selectedText() == original_word:
             cursor.insertText(suggestions[0])
+            # CRITICAL FIX: Update positions so the suggestion list knows where the new word is
+            self.last_word_start = start_pos
+            self.last_word_end = start_pos + len(clean_suggestion)
         else:
             # 3. The user typed past it and the text shifted!
-            # Find the closest occurrence of the English word dynamically.
             current_text = self.toPlainText()
             best_idx = -1
             min_dist = 999999
@@ -396,11 +403,13 @@ class PhoneticTextEdit(QPlainTextEdit):
                     best_idx = idx
                 start_idx = idx + 1
             
-            # Only replace if we found a close match (prevents replacing the wrong word)
             if best_idx != -1 and min_dist < 100:
                 cursor.setPosition(best_idx)
                 cursor.setPosition(best_idx + len(original_word), QTextCursor.MoveMode.KeepAnchor)
                 cursor.insertText(suggestions[0])
+                # CRITICAL FIX: Update positions
+                self.last_word_start = best_idx
+                self.last_word_end = best_idx + len(clean_suggestion)
             else:
                 return
 
@@ -447,13 +456,26 @@ class PhoneticTextEdit(QPlainTextEdit):
 
     def apply_suggestion(self, item):
         text = item.text()
-        if self.pending_punctuation and text.endswith(self.pending_punctuation):
-            text = text[:-len(self.pending_punctuation)]
-        cursor = self.textCursor()
+        
+        # Calculate the clean text length without punctuation for cursor updating
+        clean_text = text
+        if self.pending_punctuation and clean_text.endswith(self.pending_punctuation):
+            clean_text = clean_text[:-len(self.pending_punctuation)]
+
+        cursor = QTextCursor(self.document())
         cursor.setPosition(self.last_word_start)
-        cursor.setPosition(self.last_word_end, QTextCursor.MoveMode.KeepAnchor)
+        
+        # Include the punctuation in the selection if it exists in the document
+        end_pos = self.last_word_end
+        if self.pending_punctuation:
+            end_pos += len(self.pending_punctuation)
+            
+        cursor.setPosition(end_pos, QTextCursor.MoveMode.KeepAnchor)
         cursor.insertText(text)
-        self.last_word_end = self.last_word_start + len(text)
+        
+        # Update the end position to match the new word
+        self.last_word_end = self.last_word_start + len(clean_text)
+        
         self.suggestion_list.hide()
         self.setFocus()
         self.pending_punctuation = None

@@ -349,7 +349,6 @@ class PhoneticTextEdit(QPlainTextEdit):
         if not hasattr(self, "_active_translators"):
             self._active_translators = []
             
-        # Pass the exact positions to the worker
         start_pos = self.last_word_start
         end_pos = self.last_word_end
         
@@ -362,8 +361,10 @@ class PhoneticTextEdit(QPlainTextEdit):
             except ValueError:
                 pass
                 
-        worker.finished.connect(cleanup)
+        # CRITICAL FIX: Handle the translation FIRST, then cleanup, then delete safely
         worker.finished.connect(self.handle_translation)
+        worker.finished.connect(cleanup)
+        worker.finished.connect(worker.deleteLater)        
         worker.start()
 
     def handle_translation(self, suggestions, original_word, start_pos, end_pos):
